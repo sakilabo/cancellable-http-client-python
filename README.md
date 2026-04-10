@@ -125,7 +125,7 @@ These are all `http.client` limitations, not restrictions added by this library.
 ## Tests
 
 ```
-python -m unittest test_cancellable_http_client -v
+python -m unittest discover -s tests -v
 ```
 
 No third-party test dependencies. Tests use local throwaway servers (normal, slow, blackhole, mid-body disconnect) to exercise cancellation, timeout, and error paths without touching the network.
