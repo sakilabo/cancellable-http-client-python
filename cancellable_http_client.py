@@ -132,6 +132,8 @@ class Request:
         self._timeout: float | None = timeout
         self._timer: threading.Timer | None = None
         self._max_response_size: int | None = max_response_size or None
+        if socket_timeout is None or socket_timeout <= 0:
+            _logger.warning("socket_timeout should be a positive number; worker thread may block indefinitely or fail if the server stops responding")
 
         self._url: str = url
         parsed = urllib.parse.urlparse(url)

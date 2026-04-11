@@ -62,7 +62,7 @@ client.executor = ThreadPoolExecutor(max_workers=8)
 
 Construct a request. No network I/O happens here — connection failures are reported via `error` after `start()`.
 
-- **`socket_timeout`** — per-socket-operation timeout in seconds, passed to `http.client.HTTPConnection`.
+- **`socket_timeout`** — per-socket-operation timeout in seconds, passed to `http.client.HTTPConnection`. Must be a positive number — `None` or `0` may cause the worker thread to block indefinitely.
 - **`timeout`** — wall-clock limit in seconds for the entire request. Triggers `close()` automatically if the request is not done in time. `None` disables.
 - **`max_response_size`** — maximum response body size in bytes. If the body exceeds this limit, the request fails with `ResponseTooLargeError`. Defaults to 5 MB. Set to `None` or `0` for unlimited.
 - **`start()`** — kick off the request. Non-blocking.
