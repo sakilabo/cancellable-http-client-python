@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import http.client
 import logging
+import select
 import threading
 import urllib.parse
 
@@ -48,6 +49,13 @@ from concurrent.futures import Executor
 from typing import Callable
 
 _logger = logging.getLogger(__name__)
+
+_DEFAULT_MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
+_SELECT_POLL_INTERVAL = 0.1  # seconds — for close() responsiveness
+
+
+class ResponseTooLargeError(Exception):
+    """Raised when the response body exceeds *max_response_size*."""
 
 
 # If the user assigns an Executor here, requests are dispatched to it
@@ -64,12 +72,12 @@ class Response:
     socket has been closed.
     """
 
-    def __init__(self, resp: http.client.HTTPResponse) -> None:
+    def __init__(self, resp: http.client.HTTPResponse, body: bytearray) -> None:
         self.status: int = resp.status
         self.reason: str = resp.reason
         self.version: int = resp.version
         self.headers: http.client.HTTPMessage = resp.msg
-        self.body: bytes = resp.read()
+        self.body: bytearray = body
 
     def getheader(self, name: str, default: str | None = None) -> str | None:
         return self.headers.get(name, default)
@@ -107,9 +115,10 @@ class Request:
         url: str,
         method: str = "GET",
         headers: dict[str, str] | None = None,
-        body: bytes = b"",
+        body: bytes | None = None,
         socket_timeout: float = 30,
         timeout: float | None = None,
+        max_response_size: int | None = _DEFAULT_MAX_RESPONSE_SIZE,
     ) -> None:
         self.response: Response | None = None
         self.error: Exception | None = None
@@ -122,12 +131,13 @@ class Request:
         self._callbacks: list[Callable[["Request"], None]] = []
         self._timeout: float | None = timeout
         self._timer: threading.Timer | None = None
+        self._max_response_size: int | None = max_response_size or None
 
         self._url: str = url
         parsed = urllib.parse.urlparse(url)
         self._method: str = method
         self._headers: dict[str, str] = headers or {}
-        self._req_body: bytes = body
+        self._req_body: bytes | None = body
         self._path: str = parsed.path or "/"
         if parsed.query:
             self._path = f"{self._path}?{parsed.query}"
@@ -259,7 +269,52 @@ class Request:
             if closed:
                 conn.close()
                 return
-            resp = Response(conn.getresponse())
+
+            sock = conn.sock
+            raw_resp = conn.getresponse()
+            try:
+                use_select = sock is not None and sock.fileno() >= 0
+            except OSError:
+                use_select = False
+            content_length = raw_resp.getheader("Content-Length")
+            expected_size = int(content_length) if content_length else None
+            body = bytearray()
+
+            while True:
+                with self._lock:
+                    if self._closed:
+                        break
+                if use_select and sock.fileno() >= 0:
+                    ready, _, _ = select.select(
+                        [sock], [], [], _SELECT_POLL_INTERVAL
+                    )
+                else:
+                    # Socket was closed by getresponse() (HTTP/1.0,
+                    # will_close=True) or by a previous read1() that
+                    # consumed the last chunk.  The remaining data is
+                    # already in the HTTPResponse internal buffer, so
+                    # read1() will return immediately without blocking.
+                    ready = True
+                if ready:
+                    chunk = raw_resp.read1(8192)
+                    if not chunk:
+                        break  # EOF
+                    body.extend(chunk)
+                    if (
+                        self._max_response_size is not None
+                        and len(body) > self._max_response_size
+                    ):
+                        raise ResponseTooLargeError(
+                            f"response body exceeds {self._max_response_size} bytes"
+                        )
+
+            # Check for incomplete body
+            if expected_size is not None and len(body) < expected_size:
+                raise http.client.IncompleteRead(
+                    bytes(body), expected_size - len(body)
+                )
+
+            resp = Response(raw_resp, body)
             with self._lock:
                 if not self._closed:
                     self.response = resp

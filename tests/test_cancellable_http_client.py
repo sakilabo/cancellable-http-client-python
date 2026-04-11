@@ -424,5 +424,77 @@ class TestEdgeCases(unittest.TestCase):
         req.close()
 
 
+class _LargeBodyHandler(http.server.BaseHTTPRequestHandler):
+    """Returns a body larger than the default max_response_size."""
+
+    BODY_SIZE = 6 * 1024 * 1024  # 6 MB
+
+    def do_GET(self):
+        body = b"x" * self.BODY_SIZE
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+class TestMaxResponseSize(unittest.TestCase):
+    """Tests for max_response_size limiting."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, cls.port = _start_http_server(_LargeBodyHandler)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def test_response_too_large(self):
+        req = client.Request(f"http://127.0.0.1:{self.port}/")
+        req.start()
+        req.wait()
+        self.assertTrue(req.done)
+        self.assertIsNone(req.response)
+        self.assertIsInstance(req.error, client.ResponseTooLargeError)
+        req.close()
+
+    def test_unlimited_with_none(self):
+        req = client.Request(
+            f"http://127.0.0.1:{self.port}/", max_response_size=None
+        )
+        req.start()
+        req.wait()
+        self.assertTrue(req.done)
+        self.assertIsNone(req.error)
+        self.assertIsNotNone(req.response)
+        self.assertEqual(len(req.response.body), _LargeBodyHandler.BODY_SIZE)
+        req.close()
+
+    def test_unlimited_with_zero(self):
+        req = client.Request(
+            f"http://127.0.0.1:{self.port}/", max_response_size=0
+        )
+        req.start()
+        req.wait()
+        self.assertTrue(req.done)
+        self.assertIsNone(req.error)
+        self.assertIsNotNone(req.response)
+        self.assertEqual(len(req.response.body), _LargeBodyHandler.BODY_SIZE)
+        req.close()
+
+    def test_custom_limit(self):
+        req = client.Request(
+            f"http://127.0.0.1:{self.port}/", max_response_size=100
+        )
+        req.start()
+        req.wait()
+        self.assertTrue(req.done)
+        self.assertIsNone(req.response)
+        self.assertIsInstance(req.error, client.ResponseTooLargeError)
+        req.close()
+
+
 if __name__ == "__main__":
     unittest.main()

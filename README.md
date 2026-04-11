@@ -3,7 +3,7 @@
 A tiny, dependency-free HTTP client for Python with **cancellable in-flight requests** and **hard wall-clock timeout**.
 
 - Standard library only — no `requests`, no `httpx`, no `urllib3`.
-- Single file, ~300 lines.
+- Single file, ~350 lines (~180 lines of code).
 - Synchronous API that plays well with `threading`-based workers.
 - Safe `close()` from any thread, at any time, including mid-transfer.
 - Hard wall-clock `timeout` that bounds the entire request.
@@ -58,18 +58,23 @@ client.executor = ThreadPoolExecutor(max_workers=8)
 
 ## API
 
-### `Request(url, method="GET", headers=None, body=b"", socket_timeout=30, timeout=None)`
+### `Request(url, method="GET", headers=None, body=b"", socket_timeout=30, timeout=None, max_response_size=5*1024*1024)`
 
 Construct a request. No network I/O happens here — connection failures are reported via `error` after `start()`.
 
 - **`socket_timeout`** — per-socket-operation timeout in seconds, passed to `http.client.HTTPConnection`.
 - **`timeout`** — wall-clock limit in seconds for the entire request. Triggers `close()` automatically if the request is not done in time. `None` disables.
+- **`max_response_size`** — maximum response body size in bytes. If the body exceeds this limit, the request fails with `ResponseTooLargeError`. Defaults to 5 MB. Set to `None` or `0` for unlimited.
 - **`start()`** — kick off the request. Non-blocking.
 - **`wait(timeout=None) -> bool`** — block until the request finishes. Returns `True` on completion, `False` on timeout.
 - **`close()`** — abort the request and release resources. Safe to call any time, from any thread, any number of times.
 - **`done`** *(property)* — `True` once the request has finished (success, failure, or close).
 - **`response`** — a `Response` object on success, otherwise `None`.
 - **`error`** — the exception raised during the request, or `None`.
+
+### `ResponseTooLargeError`
+
+Raised when the response body exceeds `max_response_size`. Available as `cancellable_http_client.ResponseTooLargeError`.
 
 ### `Response`
 
@@ -80,6 +85,14 @@ A read-only, socket-free container exposing the same attributes as `http.client.
 - `body` (`bytes`, eagerly read)
 - `getheader(name, default=None)`, `getheaders()`
 
+## Defaults
+
+| Parameter | Scope | Default |
+|---|---|---|
+| `socket_timeout` | Per socket operation (connect, send, recv) | 30 s |
+| `timeout` | Wall-clock limit on the entire request | None (no limit) |
+| `max_response_size` | Maximum response body size | 5 MB |
+
 ## Robust timeout
 
 Most Python HTTP clients set a *per-socket-operation* timeout (`socket.settimeout`). This leaves several gaps:
@@ -88,14 +101,9 @@ Most Python HTTP clients set a *per-socket-operation* timeout (`socket.settimeou
 - **DNS resolution** — `socket.getaddrinfo()` is a blocking C library call with no timeout parameter. Python cannot interrupt it.
 - **Total elapsed time** — there is no built-in way to cap the wall-clock time of an entire request across connection, TLS handshake, sending, and receiving.
 
-`cancellable_http_client` addresses this with two separate knobs:
+The `timeout` parameter addresses this. When it fires it calls `close()`, which immediately unblocks any pending socket operation by closing the underlying connection. This gives you a hard upper bound on how long `wait()` will block — something that `socket_timeout` alone cannot guarantee.
 
-| Parameter | Scope | Default |
-|---|---|---|
-| `socket_timeout` | Per socket operation (connect, send, recv) | 30 s |
-| `timeout` | Wall-clock limit on the entire request | None (no limit) |
-
-When `timeout` fires it calls `close()`, which immediately unblocks any pending socket operation by closing the underlying connection. This gives you a hard upper bound on how long `wait()` will block — something that `socket_timeout` alone cannot guarantee.
+**Note:** `timeout` is disabled by default (`None`). Set it explicitly when you need a wall-clock guarantee.
 
 ## Comparison with existing libraries
 
@@ -105,7 +113,7 @@ When `timeout` fires it calls `close()`, which immediately unblocks any pending 
 | Hard wall-clock timeout on entire request | ✅ | ⚠️ per-operation | ⚠️ per-operation |
 | Synchronous API | ✅ | ✅ (also async) | ✅ |
 | No third-party dependencies | ✅ | ❌ | ❌ |
-| Line count | ~300 | thousands | thousands |
+| Line count | ~350 (~180 code) | thousands | thousands |
 | Fits a threading-based worker | ✅ | ❌ | ⚠️ |
 | Redirects, cookies, User-Agent | ⚠️ manual | ✅ | ✅ |
 
