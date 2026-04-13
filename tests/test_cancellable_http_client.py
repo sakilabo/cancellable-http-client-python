@@ -424,6 +424,38 @@ class TestEdgeCases(unittest.TestCase):
         req.close()
 
 
+class _KeepAliveHandler(http.server.BaseHTTPRequestHandler):
+    """Returns a small body over a keep-alive connection.
+
+    The entire response (headers + body) fits in a single TCP segment,
+    so getresponse() buffers the body inside Python's BufferedReader.
+    Because the connection stays open, the OS socket buffer is empty
+    after that — select() would never report it as readable.
+
+    This is the exact scenario that caused an infinite loop in v1.1,
+    where the read loop was gated on select().
+    """
+
+    def do_GET(self):
+        body = b"buffered"
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        self.wfile.write(body)
+        self.wfile.flush()
+        # Keep the connection open — do NOT close.
+        # Block until the client disconnects.
+        try:
+            while self.rfile.read(4096):
+                pass
+        except OSError:
+            pass
+
+    def log_message(self, format, *args):
+        pass
+
+
 class _LargeBodyHandler(http.server.BaseHTTPRequestHandler):
     """Returns a body larger than the default max_response_size."""
 
@@ -493,6 +525,37 @@ class TestMaxResponseSize(unittest.TestCase):
         self.assertTrue(req.done)
         self.assertIsNone(req.response)
         self.assertIsInstance(req.error, client.ResponseTooLargeError)
+        req.close()
+
+
+class TestBufferedReaderRegression(unittest.TestCase):
+    """Regression test for the v1.1 infinite-loop bug.
+
+    When the server sends a small response over a keep-alive connection,
+    getresponse() buffers the body inside Python's BufferedReader.  The
+    OS socket buffer is then empty, so select() never reports readability.
+    In v1.1 the read loop was gated on select(), causing it to spin
+    forever without calling read1().  The fix (v1.2) replaced select()
+    with a short socket timeout so read1() is always called.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, cls.port = _start_http_server(_KeepAliveHandler)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def test_small_body_over_keepalive(self):
+        req = client.Request(f"http://127.0.0.1:{self.port}/")
+        req.start()
+        completed = req.wait(timeout=3)
+        self.assertTrue(completed, "request did not complete — likely stuck in read loop")
+        self.assertIsNone(req.error)
+        self.assertIsNotNone(req.response)
+        self.assertEqual(req.response.status, 200)
+        self.assertEqual(req.response.body, b"buffered")
         req.close()
 
 
