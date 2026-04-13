@@ -8,6 +8,14 @@ A tiny, dependency-free HTTP client for Python with **cancellable in-flight requ
 - Safe `close()` from any thread, at any time, including mid-transfer.
 - Hard wall-clock `timeout` that bounds the entire request.
 
+## Installation
+
+```
+pip install cancellable-http-client
+```
+
+PyPI: https://pypi.org/project/cancellable-http-client/
+
 ## Why it exists
 
 Python has no clean way to interrupt a thread that is blocked on a socket read. `concurrent.futures.Future.cancel()` does nothing once the task has started, and `requests` / `urllib.urlopen()` give you no handle to abort an in-flight request.
