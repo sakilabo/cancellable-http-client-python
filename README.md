@@ -82,7 +82,7 @@ A read-only, socket-free container exposing the same attributes as `http.client.
 
 - `status`, `reason`, `version`
 - `headers` (an `http.client.HTTPMessage`)
-- `body` (`bytes`, eagerly read)
+- `body` (`bytearray`, eagerly read)
 - `getheader(name, default=None)`, `getheaders()`
 
 ## Defaults
