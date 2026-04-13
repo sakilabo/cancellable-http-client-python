@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import http.client
 import logging
-import select
 import threading
 import urllib.parse
 
@@ -132,8 +131,6 @@ class Request:
         self._timeout: float | None = timeout
         self._timer: threading.Timer | None = None
         self._max_response_size: int | None = max_response_size or None
-        if socket_timeout is None or socket_timeout <= 0:
-            _logger.warning("socket_timeout should be a positive number; worker thread may block indefinitely or fail if the server stops responding")
 
         self._url: str = url
         parsed = urllib.parse.urlparse(url)
@@ -275,40 +272,44 @@ class Request:
             sock = conn.sock
             raw_resp = conn.getresponse()
             try:
-                use_select = sock is not None and sock.fileno() >= 0
+                has_sock = sock is not None and sock.fileno() >= 0
             except OSError:
-                use_select = False
+                has_sock = False
             content_length = raw_resp.getheader("Content-Length")
             expected_size = int(content_length) if content_length else None
             body = bytearray()
+
+            # Use a short socket timeout instead of select() to poll
+            # for data.  select() only sees the OS-level socket buffer,
+            # but getresponse() may have already consumed the body into
+            # Python's BufferedReader, making select() blind to it.
+            # A short socket timeout on read1() handles both cases:
+            # buffered data returns immediately, socket data waits up to
+            # the timeout — and we still check _closed every iteration.
+            if has_sock:
+                try:
+                    sock.settimeout(_SELECT_POLL_INTERVAL)
+                except OSError:
+                    pass
 
             while True:
                 with self._lock:
                     if self._closed:
                         break
-                if use_select and sock.fileno() >= 0:
-                    ready, _, _ = select.select(
-                        [sock], [], [], _SELECT_POLL_INTERVAL
-                    )
-                else:
-                    # Socket was closed by getresponse() (HTTP/1.0,
-                    # will_close=True) or by a previous read1() that
-                    # consumed the last chunk.  The remaining data is
-                    # already in the HTTPResponse internal buffer, so
-                    # read1() will return immediately without blocking.
-                    ready = True
-                if ready:
+                try:
                     chunk = raw_resp.read1(8192)
-                    if not chunk:
-                        break  # EOF
-                    body.extend(chunk)
-                    if (
-                        self._max_response_size is not None
-                        and len(body) > self._max_response_size
-                    ):
-                        raise ResponseTooLargeError(
-                            f"response body exceeds {self._max_response_size} bytes"
-                        )
+                except (TimeoutError, OSError):
+                    continue
+                if not chunk:
+                    break  # EOF
+                body.extend(chunk)
+                if (
+                    self._max_response_size is not None
+                    and len(body) > self._max_response_size
+                ):
+                    raise ResponseTooLargeError(
+                        f"response body exceeds {self._max_response_size} bytes"
+                    )
 
             # Check for incomplete body
             if expected_size is not None and len(body) < expected_size:
