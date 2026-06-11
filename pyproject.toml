@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cancellable-http-client"
-version = "1.2.1"
+dynamic = ["version"]
 description = "A tiny, dependency-free HTTP client for Python with cancellable in-flight requests and hard wall-clock timeout."
 readme = "README.md"
 license = "UPL-1.0"
@@ -32,3 +32,5 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/sakilabo/cancellable-http-client-python"
 Issues = "https://github.com/sakilabo/cancellable-http-client-python/issues"
+
+[tool.setuptools_scm]
