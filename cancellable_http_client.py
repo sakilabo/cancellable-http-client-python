@@ -332,6 +332,8 @@ class Request:
             self._finalize(conn)
 
     def _finalize(self, conn: http.client.HTTPConnection | None) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
         if conn is not None:
             try:
                 conn.close()
