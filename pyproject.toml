@@ -8,6 +8,7 @@ version = "1.2.1"
 description = "A tiny, dependency-free HTTP client for Python with cancellable in-flight requests and hard wall-clock timeout."
 readme = "README.md"
 license = "UPL-1.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.7"
 authors = [
     { name = "Sakilabo Corporation Ltd." },

@@ -1,6 +1,3 @@
-# Copyright 2026 Sakilabo Corporation Ltd.
-# SPDX-License-Identifier: UPL-1.0
-
 """Tests for cancellable_http_client."""
 
 from __future__ import annotations

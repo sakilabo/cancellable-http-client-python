@@ -1,9 +1,3 @@
-# Copyright 2026 Sakilabo Corporation Ltd.
-# SPDX-License-Identifier: UPL-1.0
-#
-# Licensed under the Universal Permissive License v 1.0 as shown at
-# https://oss.oracle.com/licenses/upl/
-
 """Cancellable HTTP client.
 
 A tiny standard-library-only HTTP client whose in-flight request can be
@@ -57,8 +51,6 @@ class ResponseTooLargeError(Exception):
     """Raised when the response body exceeds *max_response_size*."""
 
 
-# If the user assigns an Executor here, requests are dispatched to it
-# instead of spawning a fresh daemon thread per call.
 executor: Executor | None = None
 
 
@@ -215,15 +207,10 @@ class Request:
         """Register ``fn`` to be invoked just before the request finishes.
 
         Unlike ``concurrent.futures.Future.add_done_callback``, the callback
-        runs *before* ``done`` becomes True and before ``wait()`` returns.
-        This means an observer that sees ``done == True`` is guaranteed
-        that every registered callback has already completed — useful for
-        callbacks that populate fields the observer wants to read.
+        runs *before* ``done`` becomes True and before ``wait()`` returns, so
+        an observer that sees ``done == True`` knows every callback has run.
 
-        The callback receives this Request as its only argument and runs
-        on the worker thread that completes the request. Registering a
-        callback on a Request that has already finished is a no-op.
-
+        ``fn`` receives this Request and runs on the completing worker thread.
         Exceptions raised by the callback are logged and swallowed.
         """
         with self._lock:
@@ -301,7 +288,7 @@ class Request:
                 except (TimeoutError, OSError):
                     continue
                 if not chunk:
-                    break  # EOF
+                    break
                 body.extend(chunk)
                 if (
                     self._max_response_size is not None
@@ -311,11 +298,8 @@ class Request:
                         f"response body exceeds {self._max_response_size} bytes"
                     )
 
-            # Check for incomplete body
             if expected_size is not None and len(body) < expected_size:
-                raise http.client.IncompleteRead(
-                    bytes(body), expected_size - len(body)
-                )
+                raise http.client.IncompleteRead(bytes(body), expected_size - len(body))
 
             resp = Response(raw_resp, body)
             with self._lock:
